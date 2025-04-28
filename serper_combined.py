@@ -40,10 +40,32 @@ def normalize_text(text):
 def load_queries(filepath):
     try:
         with open(filepath, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            if not {"query", "city", "zip"}.issubset(reader.fieldnames):
-                raise ValueError(f"Input file must contain 'query', 'city', and 'zip' columns")
-            return list(reader)
+            sniffer = csv.Sniffer()
+            sample = f.read(1024)
+            f.seek(0)
+            try:
+                has_header = sniffer.has_header(sample)
+            except csv.Error:
+                has_header = False
+
+            if has_header:
+                reader = csv.DictReader(f)
+                required_fields = {"query", "city", "state", "zip"}
+                if not required_fields.issubset(reader.fieldnames):
+                    raise ValueError(f"Input file must contain columns: {', '.join(required_fields)}")
+                return list(reader)
+            else:
+                reader = csv.reader(f)
+                rows = []
+                for row in reader:
+                    if row:
+                        rows.append({
+                            "query": row[0],
+                            "city": "",
+                            "state": "",
+                            "zip": ""
+                        })
+                return rows
     except Exception as e:
         print(f"Error loading '{filepath}': {e}")
         exit(1)
@@ -51,7 +73,7 @@ def load_queries(filepath):
 # === Fetch Places from Serper ===
 def fetch_places(session, row):
     global api_call_count
-    search_term = f"{normalize_text(row['query'])} in {normalize_text(row['city'])} {row.get('zip', '').strip()}"
+    search_term = f"{normalize_text(row['query'])} in {normalize_text(row['city'])} {normalize_text(row['state'])} {row.get('zip', '').strip()}"
     page = 1
     collected = []
 
@@ -65,7 +87,7 @@ def fetch_places(session, row):
             resp = session.post(ENDPOINT, json=payload, timeout=10)
             api_call_count += 1
             resp.raise_for_status()
-            data = json.loads(resp.text, parse_int=str, parse_float=str)  # Force CIDs as strings
+            data = json.loads(resp.text, parse_int=str, parse_float=str)
             places = data.get("places", [])
         except Exception as e:
             print(f"❌ Error on page {page}: {e}")
@@ -78,14 +100,13 @@ def fetch_places(session, row):
             entry = {
                 "query": normalize_text(row['query']),
                 "city": normalize_text(row['city']),
+                "state": normalize_text(row['state']),
                 "zip": row.get('zip', '').strip(),
                 "search_term": search_term,
                 "page": page,
             }
-            # Normalize place fields
             for key, value in place.items():
                 entry[key] = normalize_text(value)
-
             collected.append(entry)
 
         print(f"→ Page {page} returned {len(places)} places")
@@ -116,7 +137,7 @@ def run_serper(queries_path, api_key):
 
     print(f"🚀 Starting scrape of {len(queries)} queries with up to {MAX_WORKERS} workers...")
 
-    all_keys = set(["query", "city", "zip", "search_term", "page", "cid", "is_valid", "maps_url"])
+    all_keys = set(["query", "city", "state", "zip", "search_term", "page", "cid", "is_valid", "maps_url"])
 
     session_id = str(uuid.uuid4())
     session_dir = os.path.join(UPLOADS_DIR, session_id)
@@ -144,8 +165,8 @@ def run_serper(queries_path, api_key):
                 if rows_to_write:
                     if writer is None:
                         headers = [
-                            "query", "city", "zip", "search_term", "page", "is_valid", "maps_url"
-                        ] + sorted(k for k in all_keys if k not in {"query", "city", "zip", "search_term", "page", "is_valid", "maps_url"})
+                            "query", "city", "state", "zip", "search_term", "page", "is_valid", "maps_url"
+                        ] + sorted(k for k in all_keys if k not in {"query", "city", "state", "zip", "search_term", "page", "is_valid", "maps_url"})
                         writer = csv.DictWriter(f, fieldnames=headers, extrasaction='ignore')
                         writer.writeheader()
 
