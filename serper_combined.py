@@ -40,19 +40,16 @@ def normalize_text(text):
 def load_queries(filepath):
     try:
         with open(filepath, newline="", encoding="utf-8") as f:
-            sniffer = csv.Sniffer()
-            sample = f.read(1024)
+            first_line = f.readline().strip()
             f.seek(0)
-            try:
-                has_header = sniffer.has_header(sample)
-            except csv.Error:
-                has_header = False
 
-            if has_header:
+            expected_header = {"query", "city", "state", "zip"}
+            delimiter = ','
+
+            columns = set(col.strip().lower() for col in first_line.split(delimiter))
+
+            if expected_header.issubset(columns):
                 reader = csv.DictReader(f)
-                required_fields = {"query", "city", "state", "zip"}
-                if not required_fields.issubset(reader.fieldnames):
-                    raise ValueError(f"Input file must contain columns: {', '.join(required_fields)}")
                 return list(reader)
             else:
                 reader = csv.reader(f)
@@ -66,6 +63,7 @@ def load_queries(filepath):
                             "zip": ""
                         })
                 return rows
+
     except Exception as e:
         print(f"Error loading '{filepath}': {e}")
         exit(1)
